@@ -1,0 +1,6 @@
+{
+  "name": "tty.live Viewer",
+  "description": "A high-fidelity terminal streaming viewer page with interactive playback and highlight features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
