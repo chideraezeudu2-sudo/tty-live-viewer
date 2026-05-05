@@ -1,7 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Eye, Highlighter, RotateCcw, Copy, Maximize2, X, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { io, Socket } from 'socket.io-client';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL || '',
+  import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+);
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || '';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'https://tty-live.onrender.com';
 
@@ -28,14 +34,9 @@ export default function App() {
   useEffect(() => {
     if (!sessionId) return;
 
-    const socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      socket.emit('join-session', sessionId);
-    });
-
-    socket.on('terminal-output', (data: string) => {
+    // Subscribe to Supabase Realtime for live terminal data
+    const channel = supabase.channel(`session:${sessionId}`, { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'terminal_data' }, ({ payload }) => {
       setTerminalLines(prev => {
         const lines = [...prev, ...data.split('\n').filter(Boolean)];
         // Keep last 2000 lines for performance
@@ -50,32 +51,37 @@ export default function App() {
       }, 50);
     });
 
-    socket.on('viewer-count', (count: number) => setViewerCount(count));
+    channel
+      .on('broadcast', { event: 'viewer_count' }, ({ payload }) => setViewerCount(payload.count))
+      .on('broadcast', { event: 'session_stopped' }, ({ payload }) => {
+        setIsLive(false);
+        setSessionEnded(payload);
+      })
+      .subscribe();
 
-    socket.on('session-stopped', (data: { duration: number; peakViewers: number }) => {
-      setIsLive(false);
-      setSessionEnded(data);
-    });
-
-    socket.on('rewind-data', (buffer: BufferLine[]) => {
-      setRewindLines(buffer);
-    });
+    // Check if session already ended
+    fetch(`${SERVER_URL}/api/sessions/${sessionId}/status`)
+      .then(r => r.json())
+      .then(d => { if (d.status === 'completed') { setIsLive(false); setSessionEnded({ duration: 0, peakViewers: d.peak_viewers }); } })
+      .catch(() => {});
 
     return () => {
-      socket.emit('leave-session', sessionId);
-      socket.disconnect();
+      channel.unsubscribe();
     };
   }, [sessionId]);
 
   const handleRewindOpen = () => {
     setIsRewindOpen(true);
-    socketRef.current?.emit('request-rewind', sessionId);
+    fetch(`${SERVER_URL}/api/stream/rewind?session_id=${sessionId}`)
+      .then(r => r.json())
+      .then(rows => setRewindLines(rows.map((r: any) => ({ time: r.created_at, data: r.chunk }))))
+      .catch(console.error);
   };
 
   const handleHighlightLine = useCallback((lineIndex: number) => {
     if (!isHighlightMode) return;
     setHighlightedLine(lineIndex);
-    socketRef.current?.emit('highlight-line', { sessionId, lineIndex });
+    fetch(`${SERVER_URL}/api/stream/highlight`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ session_id: sessionId, line_index: lineIndex }) }).catch(()=>{});
     setTimeout(() => setHighlightedLine(null), 2000);
   }, [isHighlightMode, sessionId]);
 
