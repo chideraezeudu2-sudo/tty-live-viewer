@@ -9,8 +9,6 @@ const supabase = createClient(
 );
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'https://tty-live.netlify.app';
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'https://tty-live.onrender.com';
-
 interface BufferLine { time: string; data: string; }
 
 export default function App() {
